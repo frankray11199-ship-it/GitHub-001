@@ -18,16 +18,7 @@ from PIL import Image
 
 import compose
 import script_content as sc
-
-logging.getLogger("piper").setLevel(logging.ERROR)
-logging.getLogger("piper.phoneme_ids").setLevel(logging.CRITICAL)
-
-VOICE = os.environ.get(
-    "PIPER_VOICE",
-    "/tmp/claude-0/-home-user-GitHub-001/2332cd09-79ee-518d-92c7-a50f3c8c225c/"
-    "scratchpad/voices/zh-cn-huayan-x-low.onnx",
-)
-SR = 16000                      # piper 输出采样率
+import tts_engine
 
 PAUSE_NORMAL = 0.34             # 句间停顿
 PAUSE_CHAPTER_HEAD = 0.60       # 章节首句之后
@@ -39,36 +30,37 @@ XFADE = 0.36                    # 版式切换时的交叉溶解时长（秒）
 
 
 # ===================================================================== 语音
-def synth_all(lines, cache="build/audio"):
-    """逐句合成中文旁白，返回每句的 float32 波形。"""
+def synth_all(lines, engine, cache="build/audio"):
+    """逐句合成中文旁白，返回每句的 float32 波形。已合成的句子会复用缓存。"""
+    cache = os.path.join(cache, engine.name)
     os.makedirs(cache, exist_ok=True)
-    from piper import PiperVoice, SynthesisConfig
-
-    voice = PiperVoice.load(VOICE)
-    cfg = SynthesisConfig(length_scale=1.06, noise_scale=0.60,
-                          noise_w_scale=0.75, normalize_audio=True)
+    sr = engine.sample_rate
 
     waves = []
     for i, ln in enumerate(lines):
         path = os.path.join(cache, "line_%03d.wav" % i)
-        if not os.path.exists(path):
+        if os.path.exists(path):
+            with wave.open(path, "rb") as wf:
+                a = np.frombuffer(wf.readframes(wf.getnframes()), dtype=np.int16)
+            w = a.astype(np.float32) / 32768.0
+        else:
+            w = engine.synth(ln["text"])
             with wave.open(path, "wb") as wf:
-                voice.synthesize_wav(ln["text"], wf, syn_config=cfg)
-        with wave.open(path, "rb") as wf:
-            a = np.frombuffer(wf.readframes(wf.getnframes()), dtype=np.int16)
-        waves.append(a.astype(np.float32) / 32768.0)
+                wf.setnchannels(1); wf.setsampwidth(2); wf.setframerate(sr)
+                wf.writeframes((np.clip(w, -1, 1) * 32767).astype(np.int16).tobytes())
+        waves.append(w)
         sys.stdout.write("\r  合成 %d/%d" % (i + 1, len(lines)))
         sys.stdout.flush()
     print()
     return waves
 
 
-def build_timeline(lines, waves):
+def build_timeline(lines, waves, sr):
     """给每句排定起止时间，返回 (segments, 总时长, 完整音轨)。"""
     segs = []
     t = LEAD_IN
     for i, (ln, w) in enumerate(zip(lines, waves)):
-        dur = len(w) / SR
+        dur = len(w) / sr
         ch = sc.CHAPTERS[ln["chapter"]]
         last = (ln["index"] == len(ch["lines"]) - 1)
         first = (ln["index"] == 0)
@@ -79,21 +71,21 @@ def build_timeline(lines, waves):
         t += dur + pause
     total = t + LEAD_OUT
 
-    track = np.zeros(int(total * SR) + SR, dtype=np.float32)
+    track = np.zeros(int(total * sr) + sr, dtype=np.float32)
     for s in segs:
-        p = int(s["start"] * SR)
+        p = int(s["start"] * sr)
         track[p:p + len(s["wave"])] += s["wave"]
     peak = float(np.abs(track).max()) or 1.0
     track = track / peak * 0.89
     return segs, total, track
 
 
-def write_wav(path, track):
+def write_wav(path, track, sr):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with wave.open(path, "wb") as wf:
         wf.setnchannels(1)
         wf.setsampwidth(2)
-        wf.setframerate(SR)
+        wf.setframerate(sr)
         wf.writeframes((track * 32767).astype(np.int16).tobytes())
 
 
@@ -111,12 +103,12 @@ def write_srt(path, segs):
 
 
 # ===================================================================== 口型
-def mouth_track(seg, fps, total_frames_start):
+def mouth_track(seg, fps, sr):
     """按音频包络给出每帧口型，实现基本的口型同步。"""
     w = seg["wave"]
     n = int(round((seg["end"] - seg["start"]) * fps))
     out = []
-    win = int(SR / fps)
+    win = int(sr / fps)
     env = []
     for k in range(n):
         a, b = k * win, (k + 1) * win
@@ -171,6 +163,8 @@ def main():
     ap.add_argument("--fps", type=int, default=25)
     ap.add_argument("--out", default="output/酒店前厅部服务礼仪培训.mp4")
     ap.add_argument("--limit", type=int, default=0, help="只渲染前 N 句（调试用）")
+    ap.add_argument("--tts", default="melo", help="配音引擎: melo / kokoro / matcha / piper")
+    ap.add_argument("--speed", type=float, default=0.90, help="语速，<1 更慢")
     args = ap.parse_args()
     fps = args.fps
 
@@ -178,12 +172,15 @@ def main():
     if args.limit:
         lines = lines[:args.limit]
 
-    print("[1/5] 合成旁白 …")
-    waves = synth_all(lines)
+    print("[1/5] 合成旁白（引擎 %s，语速 %.2f）…" % (args.tts, args.speed))
+    engine = tts_engine.get_engine(args.tts, args.speed)
+    sr = engine.sample_rate
+    print("      采样率 %d Hz" % sr)
+    waves = synth_all(lines, engine)
 
     print("[2/5] 排定时间轴 …")
-    segs, total, track = build_timeline(lines, waves)
-    write_wav("build/narration.wav", track)
+    segs, total, track = build_timeline(lines, waves, sr)
+    write_wav("build/narration.wav", track, sr)
     write_srt("output/酒店前厅部服务礼仪培训.srt", segs)
     print("      总时长 %.1f 秒（%.1f 分钟），共 %d 句" % (total, total / 60, len(segs)))
 
@@ -236,7 +233,7 @@ def main():
         n = int(round(seg["end"] * fps)) - frame_no
         if n <= 0:
             continue
-        mouths = mouth_track(seg, fps, frame_no)
+        mouths = mouth_track(seg, fps, sr)
         do_xf = want_xf and prev_arr is not None and si > 0
 
         for k in range(n):
