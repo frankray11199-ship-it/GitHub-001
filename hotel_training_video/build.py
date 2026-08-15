@@ -41,6 +41,32 @@ if os.name == "nt":
 
 
 # ===================================================================== 语音
+def read_wav_mono(path, expect_sr):
+    """读一句 wav 并统一成单声道 float32。
+
+    外部工具生成的配音可能是立体声或不同位深，这里一并归一化；
+    采样率不一致会让时间轴整体错位，所以直接报错而不是悄悄接受。
+    """
+    with wave.open(path, "rb") as wf:
+        sr, ch, sw = wf.getframerate(), wf.getnchannels(), wf.getsampwidth()
+        raw = wf.readframes(wf.getnframes())
+    if sr != expect_sr:
+        raise SystemExit("%s 的采样率是 %d Hz，与本批其余句子的 %d Hz 不一致。\n"
+                         "请统一采样率后重试（可用 ffmpeg -ar %d 转换）。"
+                         % (path, sr, expect_sr, expect_sr))
+    if sw == 2:
+        a = np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0
+    elif sw == 4:
+        a = np.frombuffer(raw, dtype=np.int32).astype(np.float32) / 2147483648.0
+    elif sw == 1:
+        a = (np.frombuffer(raw, dtype=np.uint8).astype(np.float32) - 128.0) / 128.0
+    else:
+        raise SystemExit("%s 的位深不受支持（%d 字节/采样）" % (path, sw))
+    if ch > 1:
+        a = a.reshape(-1, ch).mean(axis=1)
+    return a
+
+
 def synth_all(lines, engine, cache="build/audio"):
     """逐句合成中文旁白，返回每句的 float32 波形。已合成的句子会复用缓存。"""
     cache = os.path.join(cache, engine.name)
@@ -51,9 +77,7 @@ def synth_all(lines, engine, cache="build/audio"):
     for i, ln in enumerate(lines):
         path = os.path.join(cache, "line_%03d.wav" % i)
         if os.path.exists(path):
-            with wave.open(path, "rb") as wf:
-                a = np.frombuffer(wf.readframes(wf.getnframes()), dtype=np.int16)
-            w = a.astype(np.float32) / 32768.0
+            w = read_wav_mono(path, sr)
         else:
             w = engine.synth(ln["text"])
             with wave.open(path, "wb") as wf:

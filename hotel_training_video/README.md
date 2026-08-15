@@ -41,6 +41,8 @@
 | `download_voices.py` | 下载 TTS 模型（跨平台，全部取自 GitHub Release） |
 | `platform_support.py` | 中文字体与 ffmpeg 的跨平台探测 |
 | `run.py` | 一键入口：体检 → 装依赖 → 下模型 → 出片 |
+| `export_lines.py` | 导出逐句讲稿 + 生成 IndexTTS 批量合成脚本 |
+| `sysinfo.py` | 电脑体检：系统 / 硬件 / 依赖 / 字体 / 耗时预估 |
 
 ## 实现要点
 
@@ -74,6 +76,37 @@
 | `piper` | Piper 中文 | 16000 Hz | ~8x | 体积最小的兜底方案 |
 
 `--speed` 控制语速，小于 1 更慢；培训讲解默认 0.90。
+
+### 用 IndexTTS 等外部工具配音
+
+IndexTTS 是零样本音色克隆，能用一段参考录音复刻音色，效果比上表几个开源
+模型都好。但它的权重只在 HuggingFace / ModelScope 上，pypi 也没有对应的包
+（要 `git clone` 源码装），所以只能在能访问这些站点的机器上跑。
+
+有两条路接进本项目：
+
+**A. 直接调用**（本机已装好 IndexTTS 时）
+
+```bash
+export INDEXTTS_REF=/path/to/参考人声.wav      # 5~15 秒干净普通话
+export INDEXTTS_CKPT=/path/to/checkpoints
+python build.py --tts indextts
+```
+
+**B. 先在别处批量合成，再拿回来合成到片子里**（推荐，也适用于任何其它配音工具）
+
+```bash
+python export_lines.py          # 导出 77 句文本 + synth_indextts.py
+
+# 把 synth_indextts.py 放进 index-tts 仓库根目录，改好 REF_AUDIO 后运行，
+# 会生成 line_000.wav … line_076.wav
+
+python build.py --tts external  # 读这批 wav，重新排时间轴、口型与字幕
+```
+
+外部 wav 放在 `build/audio/external/`，或用 `TTS_EXTERNAL_DIR` 指定目录。
+立体声会自动混成单声道；**各句采样率必须一致**，不一致会直接报错并提示转换
+命令，避免整条时间轴悄悄错位。
 
 ## 在自己电脑上跑
 
