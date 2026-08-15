@@ -22,6 +22,16 @@ ENGINE_PKG = {"melo": "sherpa-onnx", "kokoro": "sherpa-onnx",
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
+# Windows 控制台默认是 GBK 代码页，直接打印中文可能抛 UnicodeEncodeError，
+# 这里强制把标准输出切成 UTF-8。
+if os.name == "nt":
+    for _s in (sys.stdout, sys.stderr):
+        try:
+            _s.reconfigure(encoding="utf-8")
+        except Exception:
+            pass
+
+
 
 def missing_packages(engine):
     need = []
