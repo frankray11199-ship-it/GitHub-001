@@ -1,7 +1,11 @@
+# 下载的 TTS 模型（体积大，按需用 download_voices.py 重新获取）
 # 中间产物：逐句语音与拼接后的音轨，可由 build.py 重新生成
-build/
 # 调试用预览图
-assets/preview_*.png
+assets/lobby.png
 assets/person_sheet.png
 assets/person_zoom.png
-assets/lobby.png
+assets/preview_*.png
+build/
+output/_*.mp4
+output/_*.srt
+voices/

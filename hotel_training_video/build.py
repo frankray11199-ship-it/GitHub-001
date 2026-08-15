@@ -17,6 +17,7 @@ import numpy as np
 from PIL import Image
 
 import compose
+import platform_support
 import script_content as sc
 import tts_engine
 
@@ -181,7 +182,8 @@ def main():
     print("[2/5] 排定时间轴 …")
     segs, total, track = build_timeline(lines, waves, sr)
     write_wav("build/narration.wav", track, sr)
-    write_srt("output/酒店前厅部服务礼仪培训.srt", segs)
+    # 字幕跟随成片文件名，避免调试预览覆盖掉正式成片的字幕
+    write_srt(os.path.splitext(args.out)[0] + ".srt", segs)
     print("      总时长 %.1f 秒（%.1f 分钟），共 %d 句" % (total, total / 60, len(segs)))
 
     print("[3/5] 准备美术资源 …")
@@ -202,7 +204,7 @@ def main():
     print("[4/5] 渲染 %d 帧并编码 …" % total_frames)
     os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
     cmd = [
-        "ffmpeg", "-y", "-loglevel", "error",
+        platform_support.ffmpeg_bin(), "-y", "-loglevel", "error",
         "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", "%dx%d" % (compose.W, compose.H),
         "-r", str(fps), "-i", "-",
         "-i", "build/narration.wav",
@@ -267,10 +269,12 @@ def main():
         raise SystemExit("ffmpeg 失败，返回码 %d" % rc)
 
     print("[5/5] 完成 →", args.out)
-    out = subprocess.run(["ffprobe", "-v", "error", "-show_entries",
-                          "format=duration,size", "-of", "default=nw=1", args.out],
-                         capture_output=True, text=True).stdout
-    print(out.strip())
+    probe = platform_support.ffprobe_bin()
+    if probe:
+        out = subprocess.run([probe, "-v", "error", "-show_entries",
+                              "format=duration,size", "-of", "default=nw=1", args.out],
+                             capture_output=True, text=True).stdout
+        print(out.strip())
 
 
 if __name__ == "__main__":

@@ -38,7 +38,9 @@
 | `compose.py` | 版式合成：片头卡、章节卡、主版式（角色 + 要点板 + 字幕） |
 | `tts_engine.py` | 可插拔的中文配音引擎（MeloTTS / Kokoro / Matcha / Piper） |
 | `build.py` | 主流程：语音合成 → 时间轴 → 逐帧渲染 → ffmpeg 编码 |
-| `download_voices.sh` | 下载 TTS 模型（全部取自 GitHub Release） |
+| `download_voices.py` | 下载 TTS 模型（跨平台，全部取自 GitHub Release） |
+| `platform_support.py` | 中文字体与 ffmpeg 的跨平台探测 |
+| `run.py` | 一键入口：体检 → 装依赖 → 下模型 → 出片 |
 
 ## 实现要点
 
@@ -73,20 +75,61 @@
 
 `--speed` 控制语速，小于 1 更慢；培训讲解默认 0.90。
 
-## 重新生成
+## 在自己电脑上跑
+
+只需要 **Python 3.9+**，其余依赖 `run.py` 会自动装。
 
 ```bash
-pip install pillow numpy sherpa-onnx piper-tts
-# 需要 ffmpeg 与 Noto Sans CJK 字体
-apt-get install -y ffmpeg fonts-noto-cjk
+git clone <本仓库>
+cd hotel_training_video
 
-# 下载中文语音模型（约 600MB，全部来自 GitHub Release）
-bash download_voices.sh voices
-export TTS_MODEL_DIR=$PWD/voices
+python run.py --check     # 先体检：报告字体、ffmpeg、依赖是否就绪
+python run.py --quick     # 只出前 8 句的预览片，几分钟内看到效果
+python run.py             # 完整出片
+```
 
-python3 build.py                                     # 完整成片
-python3 build.py --tts kokoro                        # 换一个配音引擎
-python3 build.py --tts matcha --limit 6 --out output/_test.mp4   # 快速预览前 6 句
+首次运行会自动下载配音模型（melo 约 167MB，来自 GitHub Release），
+存放在 `voices/`，之后复用。
+
+**Windows** 用 `py run.py` 或 `python run.py`，命令完全一致。
+`run.py` 会自动装 `imageio-ffmpeg`，所以**不必单独安装 ffmpeg**。
+中文字体走系统自带的微软雅黑 / 苹方 / Noto，一般无需额外安装。
+
+### 耗时参考
+
+| 阶段 | 说明 |
+|---|---|
+| 下模型 | 首次约 1 分钟（167MB） |
+| 语音合成 | melo 约 1x 实时，全片约 9 分钟；用 `--tts matcha` 约 3 分钟 |
+| 逐帧渲染 + 编码 | 约 3 分钟（13344 帧） |
+
+逐句语音缓存在 `build/audio/<引擎>/`，第二次跑只重渲染，几分钟就完事。
+
+### 常用参数
+
+```bash
+python run.py --tts kokoro          # 换配音引擎: melo / kokoro / matcha / piper
+python run.py --speed 0.85          # 语速，<1 更慢
+python run.py --fps 30              # 帧率
+python run.py --voices D:/models    # 模型放到别处
+```
+
+### 出问题时
+
+| 现象 | 处理 |
+|---|---|
+| 找不到中文字体 | `python platform_support.py` 看探测结果；可设环境变量 `CJK_FONT` 指向任一中文字体文件 |
+| 找不到 ffmpeg | `pip install imageio-ffmpeg`，或设环境变量 `FFMPEG` 指向可执行文件 |
+| 模型下载慢或失败 | 单独重试 `python download_voices.py --engine melo`，已下好的会跳过 |
+| 想直接调底层 | `python build.py --help`，`run.py` 只是它的一层封装 |
+
+## 单独调用各环节
+
+```bash
+python download_voices.py --engine all      # 四个引擎的模型全下
+python build.py --tts melo                  # 直接出片（需先设 TTS_MODEL_DIR）
+python platform_support.py                  # 只看环境探测结果
+python script_content.py                    # 统计讲稿字数与预估时长
 ```
 
 `assets/` 下的图层与角色变体会被缓存复用；改动绘制代码后删除对应 PNG 即可重绘。

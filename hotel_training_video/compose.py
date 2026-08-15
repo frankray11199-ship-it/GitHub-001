@@ -7,12 +7,12 @@ from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 import art_lobby
 import art_person
+import platform_support
 
 W, H = 1920, 1080
 
-FONT_PATH = "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"
-FONT_PATH_B = "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc"
-FONT_INDEX = 2                      # NotoSansCJK 中的简体中文字面
+# 中文字体按平台自动探测（Windows / macOS / Linux 路径各不相同）
+(FONT_PATH, FONT_INDEX), (FONT_PATH_B, FONT_INDEX_B) = platform_support.find_cjk_fonts()
 
 GOLD = (208, 170, 96)
 GOLD_L = (238, 212, 156)
@@ -25,8 +25,8 @@ _font_cache = {}
 def font(size, bold=False):
     key = (size, bold)
     if key not in _font_cache:
-        path = FONT_PATH_B if bold else FONT_PATH
-        _font_cache[key] = ImageFont.truetype(path, size, index=FONT_INDEX)
+        path, idx = (FONT_PATH_B, FONT_INDEX_B) if bold else (FONT_PATH, FONT_INDEX)
+        _font_cache[key] = ImageFont.truetype(path, size, index=idx)
     return _font_cache[key]
 
 
