@@ -8,4 +8,5 @@ assets/preview_*.png
 build/
 output/_*.mp4
 output/_*.srt
+output/reference_voices/*.mp3
 voices/
